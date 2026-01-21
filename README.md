@@ -10,7 +10,7 @@ Animal behavior analytics from Milestone XProtect live feeds.
 - docs/                  design notes and API references
 - data/                  local dev data (ignored by git)
 
-## Next
-- Configure XProtect source (AI Bridge RTSP)
-- Implement detector + tracker
-- Emit analytics events back to XProtect
+## Quick start (dev)
+1) Set `RTSP_URL` and run ingest
+2) Plug in detector + tracker
+3) Send AnalyticsEvent XML via EventBridge

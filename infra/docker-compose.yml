@@ -1,0 +1,11 @@
+version: "3.9"
+services:
+  analytics:
+    image: animaluniversity/analytics:dev
+    environment:
+      - RTSP_URL=rtsp://host/stream
+      - EVENT_SERVER_URL=http://xprotect-event-server/AnalyticsEvent
+    volumes:
+      - ./services/analytics:/app
+      - ./services/eventbridge:/app/eventbridge
+    command: ["python", "-c", "print('analytics container placeholder')"]
