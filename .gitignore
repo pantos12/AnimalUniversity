@@ -9,10 +9,24 @@ __pycache__/
 node_modules/
 
 # Data
-/data/
+data/*
+!data/.gitkeep
+!data/**/.gitkeep
+/data/runs/
 *.mp4
 *.avi
 *.mkv
+
+# Model weights / artifacts
+models/*
+!models/.gitkeep
+!models/README.md
+*.pt
+*.pth
+*.onnx
+*.engine
+*.ckpt
+*.safetensors
 
 # OS
 .DS_Store
