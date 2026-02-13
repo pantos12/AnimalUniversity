@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -57,10 +58,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size.")
     parser.add_argument("--class-ids", default=None, help="Comma-separated class IDs filter.")
     parser.add_argument("--max-frames", type=int, default=None, help="Stop after N frames.")
+    parser.add_argument("--log-every", type=int, default=20, help="Summary log interval in frames.")
     parser.add_argument(
         "--zone",
         default=None,
         help="Optional behavior zone polygon: x1,y1;x2,y2;...",
+    )
+    parser.add_argument(
+        "--report-json",
+        default=None,
+        help="Optional path to write analytics summary JSON.",
+    )
+    parser.add_argument(
+        "--report-top-tracks",
+        type=int,
+        default=20,
+        help="Max tracks to include in summary report.",
     )
     parser.add_argument("--emit-events", action="store_true", help="Send pacing events to XProtect.")
     parser.add_argument("--source-id", default="CAMERA_1", help="SourceID for EventBridge payload.")
@@ -80,6 +93,7 @@ def main() -> int:
     try:
         from services.analytics.behavior import PacingAnalyzer, Zone
         from services.analytics.detector import YoloDetector, resolve_runtime_model
+        from services.analytics.reporting import AnalyticsAccumulator
         from services.analytics.tracker import IoUTracker
         from services.eventbridge.event_sender import build_analytics_event_xml, send_event
         from services.ingest.ingest import IngestConfig, frame_stream
@@ -113,6 +127,7 @@ def main() -> int:
     )
     tracker = IoUTracker(iou_threshold=0.3, max_missed=8)
     pacing = PacingAnalyzer(window_s=20.0, min_crossings=4, min_span_px=80.0, cooldown_s=10.0)
+    report = AnalyticsAccumulator()
 
     ingest_cfg = IngestConfig(rtsp_url=rtsp_url, target_fps=args.target_fps)
     frame_count = 0
@@ -123,8 +138,9 @@ def main() -> int:
         detections = detector.detect(frame)
         tracks = tracker.update(detections)
         behavior_events = pacing.update(tracks=tracks, timestamp_s=ts, zone=zone)
+        report.update(ts=ts, detections=detections, tracks=tracks, behavior_events=behavior_events)
 
-        if frame_count % 20 == 0:
+        if args.log_every > 0 and frame_count % args.log_every == 0:
             logger.info(
                 "frames=%d detections=%d tracks=%d pacing_events=%d",
                 frame_count,
@@ -153,7 +169,25 @@ def main() -> int:
         if args.max_frames is not None and frame_count >= args.max_frames:
             break
 
+    summary = report.summary(top_tracks=args.report_top_tracks)
     logger.info("Done. Processed frames=%d, emitted_events=%d", frame_count, event_count)
+    logger.info(
+        "Summary: frames_with_detections=%d/%d (%.2f), detections_total=%d, unique_tracks=%d, max_concurrent_tracks=%d",
+        int(summary["frames_with_detections"]),
+        int(summary["frames_processed"]),
+        float(summary["frames_with_detections_ratio"]),
+        int(summary["detections_total"]),
+        int(summary["unique_tracks"]),
+        int(summary["max_concurrent_tracks"]),
+    )
+    logger.info("Detections by label: %s", summary["detections_by_label"])
+    logger.info("Behavior events: %s", summary["behavior_events_by_name"])
+
+    if args.report_json:
+        report_path = Path(args.report_json)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        logger.info("Wrote analytics summary to %s", report_path)
     return 0
 
 
