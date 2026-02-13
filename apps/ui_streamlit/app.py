@@ -444,9 +444,12 @@ def _draw_overlay(
             cv2.LINE_AA,
         )
 
-    # Progress ring.
-    center = (w // 2, h // 2)
-    radius = max(28, min(w, h) // 18)
+    # Progress ring moved away from center to avoid obscuring subjects.
+    radius = max(22, min(w, h) // 28)
+    center = (max(radius + 20, w - radius - 26), radius + 24)
+    ring_bg = out.copy()
+    cv2.circle(ring_bg, center, radius + 10, (18, 19, 24), -1, cv2.LINE_AA)
+    out = cv2.addWeighted(ring_bg, 0.55, out, 0.45, 0)
     cv2.circle(out, center, radius, (240, 240, 240), 2, cv2.LINE_AA)
     arc_end = int(360 * max(0.0, min(1.0, progress_ratio)))
     cv2.ellipse(out, center, (radius, radius), -90, 0, arc_end, (54, 168, 255), 6, cv2.LINE_AA)
@@ -698,9 +701,9 @@ def main() -> None:
         selected_weight = st.selectbox("Model weights", weight_options, index=default_idx)
 
         track_primary = st.checkbox(
-            "Track primary animal",
-            value=True,
-            help="Keeps one stable target lock. Disable to render all detected animals.",
+            "Track primary animal only",
+            value=False,
+            help="Off: track all detected animals. On: lock to a single target.",
         )
         stabilize_species = st.checkbox(
             "Stabilize species labels",
@@ -714,12 +717,12 @@ def main() -> None:
         )
         infer_fps = st.slider("Inference FPS", min_value=1, max_value=12, value=4, step=1)
         max_frames = st.slider("Max frames", min_value=60, max_value=3600, value=480, step=60)
-        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.2, step=0.05)
+        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.08, step=0.01)
         min_area_percent = st.slider(
             "Minimum object area (%)",
             min_value=0.01,
             max_value=5.0,
-            value=0.08,
+            value=0.02,
             step=0.01,
             help="Filters tiny noisy detections.",
         )
@@ -730,7 +733,8 @@ def main() -> None:
             value=36,
             step=6,
         )
-        imgsz = st.select_slider("Model image size", options=[640, 736, 832, 960, 1024], value=960)
+        imgsz = st.select_slider("Model image size", options=[640, 736, 832, 960, 1024], value=1024)
+        st.caption("For multiple animals in-frame, confidence 0.05-0.12 usually catches more subjects.")
         run_btn = st.button("Run Analysis", type="primary")
 
     video_path: Optional[Path] = _save_upload(upload, raw_dir)
