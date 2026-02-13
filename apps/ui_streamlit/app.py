@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import sys
+import time
 from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,11 +26,10 @@ from services.analytics.tracker import Detection, IoUTracker, Track
 
 @dataclass(frozen=True)
 class DemoOptions:
-    profile_name: str
+    analysis_mode: str
     allow_labels: Optional[Set[str]]
-    relabel_map: Dict[str, str]
     min_area_ratio: float
-    single_target_mode: bool
+    track_primary_subject: bool
     lock_persistence_frames: int
     tracker_iou: float
     tracker_max_missed: int
@@ -65,7 +65,7 @@ class SessionStats:
     detections_total_kept: int = 0
     confidence_sum: float = 0.0
     suppressed_small_area: int = 0
-    suppressed_focus_filter: int = 0
+    suppressed_label_filter: int = 0
     detections_by_label: Counter[str] = field(default_factory=Counter)
     unique_tracks_by_label: Dict[str, Set[int]] = field(default_factory=lambda: defaultdict(set))
 
@@ -103,6 +103,25 @@ def _save_upload(upload, raw_dir: Path) -> Optional[Path]:
     st.session_state["last_upload_sig"] = sig
     upload.seek(0)
     return dst
+
+
+def _open_video_writer(
+    preferred_path: Path,
+    fps: float,
+    size: Tuple[int, int],
+) -> Tuple[cv2.VideoWriter, Path, str]:
+    candidates = [
+        ("avc1", ".mp4"),
+        ("mp4v", ".mp4"),
+        ("MJPG", ".avi"),
+    ]
+    for codec, suffix in candidates:
+        out_path = preferred_path.with_suffix(suffix)
+        writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*codec), fps, size)
+        if writer.isOpened():
+            return writer, out_path, codec
+        writer.release()
+    raise RuntimeError("Could not create output video writer with avc1/mp4v/MJPG codecs.")
 
 
 def _color_for_key(key: str) -> Tuple[int, int, int]:
@@ -196,21 +215,20 @@ def _postprocess_detections(
             stats.suppressed_small_area += 1
             continue
         if options.allow_labels is not None and src_label not in options.allow_labels:
-            stats.suppressed_focus_filter += 1
+            stats.suppressed_label_filter += 1
             continue
 
-        mapped_label = options.relabel_map.get(src_label, src_label)
         clipped = _clip_bbox(det.bbox_xyxy, frame_width, frame_height)
         processed.append(
             Detection(
                 bbox_xyxy=clipped,
                 confidence=float(det.confidence),
-                label=mapped_label,
+                label=src_label,
             )
         )
         stats.detections_total_kept += 1
         stats.confidence_sum += float(det.confidence)
-        stats.detections_by_label[mapped_label] += 1
+        stats.detections_by_label[src_label] += 1
     return processed
 
 
@@ -427,11 +445,13 @@ def _render_demo_clip(
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 720)
     frame_step = max(1, int(round(native_fps / max(1, infer_fps))))
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(out_path), fourcc, max(1.0, float(infer_fps)), (width, height))
-    if not writer.isOpened():
-        cap.release()
-        raise RuntimeError(f"Could not create output video: {out_path}")
+    out_width = width if width % 2 == 0 else max(2, width - 1)
+    out_height = height if height % 2 == 0 else max(2, height - 1)
+    writer, out_path, codec = _open_video_writer(
+        preferred_path=out_path,
+        fps=max(1.0, float(infer_fps)),
+        size=(out_width, out_height),
+    )
 
     detector = YoloDetector(
         weights_path=weights_path,
@@ -469,7 +489,7 @@ def _render_demo_clip(
 
         tracks = tracker.update(dets)
         render_tracks: List[RenderTrack]
-        if options.single_target_mode:
+        if options.track_primary_subject:
             target_lock_state, render_tracks, has_lock = _update_target_lock(
                 tracks=tracks,
                 state=target_lock_state,
@@ -506,7 +526,9 @@ def _render_demo_clip(
             progress_ratio=(stats.frames_processed / float(max_frames)),
             frame_time_s=ts,
         )
-        writer.write(rendered)
+        if rendered.shape[1] != out_width or rendered.shape[0] != out_height:
+            rendered = cv2.resize(rendered, (out_width, out_height), interpolation=cv2.INTER_AREA)
+        writer.write(np.ascontiguousarray(rendered, dtype=np.uint8))
 
     cap.release()
     writer.release()
@@ -518,7 +540,8 @@ def _render_demo_clip(
     summary = {
         "video_path": str(video_path),
         "weights_path": str(weights_path),
-        "profile": options.profile_name,
+        "mode": options.analysis_mode,
+        "writer_codec": codec,
         "frames_processed": stats.frames_processed,
         "frames_with_detections": stats.frames_with_detections,
         "frames_with_target_lock": stats.frames_with_target_lock,
@@ -530,7 +553,7 @@ def _render_demo_clip(
         "unique_tracks_by_label": {k: len(v) for k, v in stats.unique_tracks_by_label.items()},
         "suppressed": {
             "small_area": stats.suppressed_small_area,
-            "focus_filter": stats.suppressed_focus_filter,
+            "label_filter": stats.suppressed_label_filter,
         },
         "output_video_path": str(out_path),
     }
@@ -568,7 +591,7 @@ def _render_header() -> None:
             Detect, lock, and follow the correct animal over long footage with cleaner overlays,
             stronger tracking persistence, and production-ready summary analytics.
           </p>
-          <div class="au-chip">Panda Focus profile now includes label stabilization and target lock</div>
+          <div class="au-chip">Automatic animal detection with stable target tracking</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -604,29 +627,19 @@ def main() -> None:
                 break
         selected_weight = st.selectbox("Model weights", weight_options, index=default_idx)
 
-        profile_name = st.selectbox(
-            "Detection profile",
-            ["Panda Focus", "General Species"],
-            index=0,
-            help=(
-                "Panda Focus keeps a single locked subject and remaps supported source labels "
-                "to a panda output label."
-            ),
-        )
-        bird_fallback = st.checkbox(
-            "Use bird fallback for panda mapping",
+        track_primary = st.checkbox(
+            "Track primary animal",
             value=True,
-            help="Useful when the model confuses panda as bird in some frames.",
+            help="Keeps one stable target lock. Disable to render all detected animals.",
         )
         infer_fps = st.slider("Inference FPS", min_value=1, max_value=12, value=4, step=1)
         max_frames = st.slider("Max frames", min_value=60, max_value=3600, value=480, step=60)
-        conf_default = 0.1 if profile_name == "Panda Focus" else 0.25
-        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=conf_default, step=0.05)
+        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.2, step=0.05)
         min_area_percent = st.slider(
             "Minimum object area (%)",
             min_value=0.01,
             max_value=5.0,
-            value=0.20 if profile_name == "Panda Focus" else 0.05,
+            value=0.08,
             step=0.01,
             help="Filters tiny noisy detections.",
         )
@@ -638,7 +651,7 @@ def main() -> None:
             step=6,
         )
         imgsz = st.select_slider("Model image size", options=[640, 736, 832, 960, 1024], value=960)
-        run_btn = st.button("Generate Premium Tracking Demo", type="primary")
+        run_btn = st.button("Run Analysis", type="primary")
 
     video_path: Optional[Path] = _save_upload(upload, raw_dir)
     if video_path is not None:
@@ -659,29 +672,15 @@ def main() -> None:
             st.error(f"Weights not found: {weights_path}")
             return
 
-        profile = profile_name.lower().replace(" ", "_")
         allow_labels: Optional[Set[str]] = None
-        relabel_map: Dict[str, str] = {}
-        single_target_mode = False
-        tracker_max_missed = 28
-        tracker_iou = 0.25
-
-        if profile == "panda_focus":
-            allow_labels = {"bear"}
-            relabel_map = {"bear": "panda"}
-            if bird_fallback:
-                allow_labels = {"bear", "bird"}
-                relabel_map["bird"] = "panda"
-            single_target_mode = True
-            tracker_max_missed = max(40, lock_persistence + 8)
-            tracker_iou = 0.18
+        tracker_iou = 0.18 if track_primary else 0.25
+        tracker_max_missed = max(40, lock_persistence + 8) if track_primary else 28
 
         options = DemoOptions(
-            profile_name=profile_name,
+            analysis_mode="automatic",
             allow_labels=allow_labels,
-            relabel_map=relabel_map,
             min_area_ratio=float(min_area_percent) / 100.0,
-            single_target_mode=single_target_mode,
+            track_primary_subject=bool(track_primary),
             lock_persistence_frames=int(lock_persistence),
             tracker_iou=float(tracker_iou),
             tracker_max_missed=int(tracker_max_missed),
@@ -689,7 +688,8 @@ def main() -> None:
             imgsz=int(imgsz),
         )
 
-        out_path = run_dir / f"{video_path.stem}_{weights_path.stem}_{profile}.mp4"
+        stamp = int(time.time())
+        out_path = run_dir / f"{video_path.stem}_{weights_path.stem}_analysis_{stamp}.mp4"
         with st.spinner("Running detection, stabilization, and visual polish..."):
             summary = _render_demo_clip(
                 video_path=video_path,
@@ -730,7 +730,7 @@ def main() -> None:
         sup = summary["suppressed"]
         st.markdown(
             f'<div class="au-note">Suppressed detections: '
-            f'{int(sup["small_area"])} small-area, {int(sup["focus_filter"])} outside focus profile.</div>',
+            f'{int(sup["small_area"])} small-area, {int(sup["label_filter"])} outside label filter.</div>',
             unsafe_allow_html=True,
         )
         with st.expander("Technical Run Summary", expanded=False):
