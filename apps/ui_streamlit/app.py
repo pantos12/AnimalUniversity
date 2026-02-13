@@ -30,6 +30,11 @@ class DemoOptions:
     allow_labels: Optional[Set[str]]
     min_area_ratio: float
     track_primary_subject: bool
+    stabilize_species_labels: bool
+    use_scene_consensus: bool
+    scene_consensus_min_ratio: float
+    scene_consensus_max_conf: float
+    scene_history_window: int
     lock_persistence_frames: int
     tracker_iou: float
     tracker_max_missed: int
@@ -66,7 +71,9 @@ class SessionStats:
     confidence_sum: float = 0.0
     suppressed_small_area: int = 0
     suppressed_label_filter: int = 0
+    label_corrections: int = 0
     detections_by_label: Counter[str] = field(default_factory=Counter)
+    rendered_by_label: Counter[str] = field(default_factory=Counter)
     unique_tracks_by_label: Dict[str, Set[int]] = field(default_factory=lambda: defaultdict(set))
 
 
@@ -230,6 +237,48 @@ def _postprocess_detections(
         stats.confidence_sum += float(det.confidence)
         stats.detections_by_label[src_label] += 1
     return processed
+
+
+def _stabilize_track_label(
+    track: RenderTrack,
+    label_votes: Dict[int, Counter[str]],
+    scene_labels: Deque[str],
+    scene_counter: Counter[str],
+    options: DemoOptions,
+    stats: SessionStats,
+) -> str:
+    current = str(track.label).lower().strip()
+    votes = label_votes[int(track.track_id)]
+    votes[current] += 1
+
+    chosen = current
+    if options.stabilize_species_labels and votes:
+        chosen = votes.most_common(1)[0][0]
+
+    if options.use_scene_consensus and scene_counter:
+        dominant_label, dominant_count = scene_counter.most_common(1)[0]
+        total = max(1, sum(scene_counter.values()))
+        dominant_ratio = dominant_count / float(total)
+        chosen_ratio = scene_counter.get(chosen, 0) / float(total)
+        if (
+            dominant_label != chosen
+            and dominant_ratio >= options.scene_consensus_min_ratio
+            and chosen_ratio <= 0.20
+            and float(track.score) <= options.scene_consensus_max_conf
+        ):
+            chosen = dominant_label
+
+    if chosen != current:
+        stats.label_corrections += 1
+
+    scene_labels.append(chosen)
+    scene_counter[chosen] += 1
+    while len(scene_labels) > options.scene_history_window:
+        old = scene_labels.popleft()
+        scene_counter[old] -= 1
+        if scene_counter[old] <= 0:
+            del scene_counter[old]
+    return chosen
 
 
 def _to_render_track(track: Track, label_override: Optional[str] = None) -> RenderTrack:
@@ -463,6 +512,8 @@ def _render_demo_clip(
     bbox_smoothing_cache: Dict[int, Tuple[float, float, float, float]] = {}
     track_history: Dict[int, Deque[Tuple[int, int]]] = {}
     label_votes: Dict[int, Counter[str]] = defaultdict(Counter)
+    scene_labels: Deque[str] = deque()
+    scene_counter: Counter[str] = Counter()
     target_lock_state: Optional[TargetLockState] = None
     stats = SessionStats()
 
@@ -503,10 +554,26 @@ def _render_demo_clip(
         else:
             render_tracks = []
             for tr in tracks:
-                tid = int(tr.track_id)
-                label_votes[tid][str(tr.label)] += 1
-                stable = label_votes[tid].most_common(1)[0][0]
-                render_tracks.append(_to_render_track(tr, label_override=stable))
+                render_tracks.append(_to_render_track(tr))
+
+        for tr in render_tracks:
+            if not tr.predicted:
+                tr.label = _stabilize_track_label(
+                    track=tr,
+                    label_votes=label_votes,
+                    scene_labels=scene_labels,
+                    scene_counter=scene_counter,
+                    options=options,
+                    stats=stats,
+                )
+            else:
+                scene_labels.append(tr.label)
+                scene_counter[tr.label] += 1
+                while len(scene_labels) > options.scene_history_window:
+                    old = scene_labels.popleft()
+                    scene_counter[old] -= 1
+                    if scene_counter[old] <= 0:
+                        del scene_counter[old]
 
         for tr in render_tracks:
             smoothed = _smooth_bbox(
@@ -516,6 +583,7 @@ def _render_demo_clip(
                 alpha=options.smoothing_alpha,
             )
             tr.bbox_xyxy = smoothed
+            stats.rendered_by_label[tr.label] += 1
             stats.unique_tracks_by_label[tr.label].add(tr.track_id)
 
         ts = frame_idx / native_fps
@@ -550,11 +618,13 @@ def _render_demo_clip(
         "detections_total_kept": stats.detections_total_kept,
         "avg_confidence": round(avg_conf, 4),
         "detections_by_label": dict(stats.detections_by_label),
+        "rendered_by_label": dict(stats.rendered_by_label),
         "unique_tracks_by_label": {k: len(v) for k, v in stats.unique_tracks_by_label.items()},
         "suppressed": {
             "small_area": stats.suppressed_small_area,
             "label_filter": stats.suppressed_label_filter,
         },
+        "label_corrections": stats.label_corrections,
         "output_video_path": str(out_path),
     }
     return summary
@@ -632,6 +702,16 @@ def main() -> None:
             value=True,
             help="Keeps one stable target lock. Disable to render all detected animals.",
         )
+        stabilize_species = st.checkbox(
+            "Stabilize species labels",
+            value=True,
+            help="Uses short track history to reduce label flips in multi-animal scenes.",
+        )
+        scene_consensus = st.checkbox(
+            "Use scene consensus for low-confidence labels",
+            value=True,
+            help="If one species dominates the scene, low-confidence outliers are corrected.",
+        )
         infer_fps = st.slider("Inference FPS", min_value=1, max_value=12, value=4, step=1)
         max_frames = st.slider("Max frames", min_value=60, max_value=3600, value=480, step=60)
         conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.2, step=0.05)
@@ -681,6 +761,11 @@ def main() -> None:
             allow_labels=allow_labels,
             min_area_ratio=float(min_area_percent) / 100.0,
             track_primary_subject=bool(track_primary),
+            stabilize_species_labels=bool(stabilize_species),
+            use_scene_consensus=bool(scene_consensus),
+            scene_consensus_min_ratio=0.65,
+            scene_consensus_max_conf=0.55,
+            scene_history_window=180,
             lock_persistence_frames=int(lock_persistence),
             tracker_iou=float(tracker_iou),
             tracker_max_missed=int(tracker_max_missed),
@@ -714,7 +799,7 @@ def main() -> None:
 
         st.markdown('<div class="au-section">Species Breakdown</div>', unsafe_allow_html=True)
         rows: List[Dict[str, object]] = []
-        for label, count in sorted(summary["detections_by_label"].items()):
+        for label, count in sorted(summary["rendered_by_label"].items()):
             rows.append(
                 {
                     "Species": label,
@@ -730,7 +815,8 @@ def main() -> None:
         sup = summary["suppressed"]
         st.markdown(
             f'<div class="au-note">Suppressed detections: '
-            f'{int(sup["small_area"])} small-area, {int(sup["label_filter"])} outside label filter.</div>',
+            f'{int(sup["small_area"])} small-area, {int(sup["label_filter"])} outside label filter. '
+            f'Label corrections applied: {int(summary["label_corrections"])}.</div>',
             unsafe_allow_html=True,
         )
         with st.expander("Technical Run Summary", expanded=False):
