@@ -23,6 +23,8 @@ from animaluniversity.utils.paths import get_data_dir, get_models_dir
 from services.analytics.detector import YoloDetector
 from services.analytics.tracker import Detection, IoUTracker, Track
 
+SMALL_SPECIES = {"bird"}
+
 
 @dataclass(frozen=True)
 class DemoOptions:
@@ -35,6 +37,12 @@ class DemoOptions:
     scene_consensus_min_ratio: float
     scene_consensus_max_conf: float
     scene_history_window: int
+    detector_augment: bool
+    tiled_recall: bool
+    tile_overlap: float
+    startup_dense_seconds: float
+    small_species_area_guard: float
+    small_species_guard_max_conf: float
     lock_persistence_frames: int
     tracker_iou: float
     tracker_max_missed: int
@@ -239,11 +247,69 @@ def _postprocess_detections(
     return processed
 
 
+def _nms_detections(
+    detections: List[Detection],
+    iou_threshold: float = 0.82,
+    cross_label_iou_threshold: float = 0.72,
+) -> List[Detection]:
+    ranked = sorted(detections, key=lambda d: float(d.confidence), reverse=True)
+    kept: List[Detection] = []
+    for det in ranked:
+        suppressed = False
+        for keep in kept:
+            ov = _bbox_iou(det.bbox_xyxy, keep.bbox_xyxy)
+            if det.label == keep.label and ov >= iou_threshold:
+                suppressed = True
+                break
+            if det.label != keep.label and ov >= cross_label_iou_threshold and det.confidence <= keep.confidence:
+                suppressed = True
+                break
+        if not suppressed:
+            kept.append(det)
+    return kept
+
+
+def _detect_with_tiles(detector: YoloDetector, frame: np.ndarray, overlap: float = 0.18) -> List[Detection]:
+    h, w = frame.shape[:2]
+    ox = max(8, int(w * max(0.0, min(overlap, 0.4))))
+    oy = max(8, int(h * max(0.0, min(overlap, 0.4))))
+    mx = w // 2
+    my = h // 2
+    tiles = [
+        (0, 0, min(w, mx + ox), min(h, my + oy)),
+        (max(0, mx - ox), 0, w, min(h, my + oy)),
+        (0, max(0, my - oy), min(w, mx + ox), h),
+        (max(0, mx - ox), max(0, my - oy), w, h),
+    ]
+
+    detections: List[Detection] = []
+    for x1, y1, x2, y2 in tiles:
+        if x2 - x1 < 16 or y2 - y1 < 16:
+            continue
+        crop = frame[y1:y2, x1:x2]
+        for det in detector.detect(crop):
+            bx1, by1, bx2, by2 = det.bbox_xyxy
+            detections.append(
+                Detection(
+                    bbox_xyxy=(
+                        float(bx1 + x1),
+                        float(by1 + y1),
+                        float(bx2 + x1),
+                        float(by2 + y1),
+                    ),
+                    confidence=float(det.confidence),
+                    label=str(det.label),
+                )
+            )
+    return detections
+
+
 def _stabilize_track_label(
     track: RenderTrack,
     label_votes: Dict[int, Counter[str]],
     scene_labels: Deque[str],
     scene_counter: Counter[str],
+    frame_area: float,
     options: DemoOptions,
     stats: SessionStats,
 ) -> str:
@@ -267,6 +333,19 @@ def _stabilize_track_label(
             and float(track.score) <= options.scene_consensus_max_conf
         ):
             chosen = dominant_label
+
+    # Generic guard: very large low-confidence "small species" labels are likely mismatches.
+    if chosen in SMALL_SPECIES:
+        x1, y1, x2, y2 = track.bbox_xyxy
+        area_ratio = max(0.0, (x2 - x1) * (y2 - y1)) / max(1.0, frame_area)
+        if (
+            area_ratio >= options.small_species_area_guard
+            and float(track.score) <= options.small_species_guard_max_conf
+        ):
+            non_small = [(lbl, cnt) for lbl, cnt in scene_counter.items() if lbl not in SMALL_SPECIES]
+            if non_small:
+                non_small.sort(key=lambda t: t[1], reverse=True)
+                chosen = non_small[0][0]
 
     if chosen != current:
         stats.label_corrections += 1
@@ -508,10 +587,19 @@ def _render_demo_clip(
     detector = YoloDetector(
         weights_path=weights_path,
         conf_threshold=conf,
+        nms_iou=0.9 if not options.track_primary_subject else 0.75,
         device="cpu",
         imgsz=options.imgsz,
+        augment=options.detector_augment,
     )
-    tracker = IoUTracker(iou_threshold=options.tracker_iou, max_missed=options.tracker_max_missed)
+    tracker = IoUTracker(
+        iou_threshold=options.tracker_iou,
+        max_missed=options.tracker_max_missed,
+        allow_label_switch=True,
+        switch_iou_threshold=max(0.5, options.tracker_iou + 0.2),
+        switch_conf_max=0.72,
+        switch_iou_penalty=0.10,
+    )
     bbox_smoothing_cache: Dict[int, Tuple[float, float, float, float]] = {}
     track_history: Dict[int, Deque[Tuple[int, int]]] = {}
     label_votes: Dict[int, Counter[str]] = defaultdict(Counter)
@@ -526,11 +614,16 @@ def _render_demo_clip(
         if not ok:
             break
         frame_idx += 1
-        if frame_idx % frame_step != 0:
+        t_s = frame_idx / native_fps if native_fps > 0 else 0.0
+        active_step = 1 if t_s <= options.startup_dense_seconds else frame_step
+        if frame_idx % active_step != 0:
             continue
         stats.frames_processed += 1
 
         raw_dets = detector.detect(frame)
+        if options.tiled_recall and t_s <= options.startup_dense_seconds:
+            raw_dets.extend(_detect_with_tiles(detector=detector, frame=frame, overlap=options.tile_overlap))
+        raw_dets = _nms_detections(raw_dets)
         dets = _postprocess_detections(
             detections=raw_dets,
             frame_width=width,
@@ -566,6 +659,7 @@ def _render_demo_clip(
                     label_votes=label_votes,
                     scene_labels=scene_labels,
                     scene_counter=scene_counter,
+                    frame_area=float(width * height),
                     options=options,
                     stats=stats,
                 )
@@ -613,6 +707,9 @@ def _render_demo_clip(
         "weights_path": str(weights_path),
         "mode": options.analysis_mode,
         "writer_codec": codec,
+        "detector_augment": options.detector_augment,
+        "tiled_recall": options.tiled_recall,
+        "startup_dense_seconds": options.startup_dense_seconds,
         "frames_processed": stats.frames_processed,
         "frames_with_detections": stats.frames_with_detections,
         "frames_with_target_lock": stats.frames_with_target_lock,
@@ -715,9 +812,27 @@ def main() -> None:
             value=True,
             help="If one species dominates the scene, low-confidence outliers are corrected.",
         )
+        high_accuracy = st.checkbox(
+            "High accuracy mode (TTA)",
+            value=True,
+            help="Runs augmented inference for hard scenes (slower, better recall).",
+        )
+        tiled_recall = st.checkbox(
+            "Enable tiled recall assist",
+            value=True,
+            help="Runs extra tiled detections at startup to catch partially occluded animals.",
+        )
+        startup_dense_seconds = st.slider(
+            "Startup dense scan (seconds)",
+            min_value=0.0,
+            max_value=20.0,
+            value=8.0,
+            step=0.5,
+            help="Scans every frame at the start to catch multiple animals early.",
+        )
         infer_fps = st.slider("Inference FPS", min_value=1, max_value=12, value=4, step=1)
         max_frames = st.slider("Max frames", min_value=60, max_value=3600, value=480, step=60)
-        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.08, step=0.01)
+        conf = st.slider("Confidence", min_value=0.05, max_value=0.9, value=0.05, step=0.01)
         min_area_percent = st.slider(
             "Minimum object area (%)",
             min_value=0.01,
@@ -770,6 +885,12 @@ def main() -> None:
             scene_consensus_min_ratio=0.65,
             scene_consensus_max_conf=0.55,
             scene_history_window=180,
+            detector_augment=bool(high_accuracy),
+            tiled_recall=bool(tiled_recall),
+            tile_overlap=0.18,
+            startup_dense_seconds=float(startup_dense_seconds),
+            small_species_area_guard=0.018,
+            small_species_guard_max_conf=0.72,
             lock_persistence_frames=int(lock_persistence),
             tracker_iou=float(tracker_iou),
             tracker_max_missed=int(tracker_max_missed),

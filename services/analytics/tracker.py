@@ -87,9 +87,21 @@ class IoUTracker(Tracker):
     dependencies.
     """
 
-    def __init__(self, iou_threshold: float = 0.3, max_missed: int = 8) -> None:
+    def __init__(
+        self,
+        iou_threshold: float = 0.3,
+        max_missed: int = 8,
+        allow_label_switch: bool = False,
+        switch_iou_threshold: float = 0.55,
+        switch_conf_max: float = 0.65,
+        switch_iou_penalty: float = 0.12,
+    ) -> None:
         self.iou_threshold = iou_threshold
         self.max_missed = max_missed
+        self.allow_label_switch = allow_label_switch
+        self.switch_iou_threshold = switch_iou_threshold
+        self.switch_conf_max = switch_conf_max
+        self.switch_iou_penalty = switch_iou_penalty
         self._next_id = 1
         self._frame_idx = 0
         self._states: Dict[int, _TrackState] = {}
@@ -108,11 +120,19 @@ class IoUTracker(Tracker):
         for det_idx, det in enumerate(dets):
             for track_id in active_ids:
                 state = self._states[track_id]
-                if state.label != det.label:
-                    continue
                 iou = _bbox_iou(det.bbox_xyxy, state.bbox_xyxy)
-                if iou >= self.iou_threshold:
-                    candidates.append((iou, det_idx, track_id))
+                if state.label == det.label:
+                    if iou >= self.iou_threshold:
+                        candidates.append((iou, det_idx, track_id))
+                    continue
+
+                if not self.allow_label_switch:
+                    continue
+                if det.confidence > self.switch_conf_max:
+                    continue
+                if iou < self.switch_iou_threshold:
+                    continue
+                candidates.append((iou - self.switch_iou_penalty, det_idx, track_id))
         candidates.sort(reverse=True)
 
         assigned_det: Dict[int, int] = {}
@@ -130,9 +150,15 @@ class IoUTracker(Tracker):
                 track_id = self._next_id
                 self._next_id += 1
 
+            prev_state = self._states.get(track_id)
+            assigned_label = det.label
+            # Preserve stable label on low-confidence cross-label switches.
+            if prev_state is not None and prev_state.label != det.label and self.allow_label_switch:
+                assigned_label = prev_state.label
+
             self._states[track_id] = _TrackState(
                 bbox_xyxy=det.bbox_xyxy,
-                label=det.label,
+                label=assigned_label,
                 score=det.confidence,
                 last_seen_frame=self._frame_idx,
             )
@@ -140,7 +166,7 @@ class IoUTracker(Tracker):
                 Track(
                     track_id=track_id,
                     bbox_xyxy=det.bbox_xyxy,
-                    label=det.label,
+                    label=assigned_label,
                     score=det.confidence,
                 )
             )

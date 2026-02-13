@@ -119,6 +119,8 @@ class YoloDetector:
         device: Optional[str] = None,
         class_ids: Optional[List[int]] = None,
         imgsz: int = 640,
+        augment: bool = False,
+        nms_iou: float = 0.7,
     ) -> None:
         from ultralytics import YOLO
 
@@ -130,14 +132,18 @@ class YoloDetector:
         self.device = device or _resolve_ultralytics_device()
         self.class_ids = class_ids
         self.imgsz = imgsz
+        self.augment = augment
+        self.nms_iou = nms_iou
 
     def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
         results = self._model.predict(
             source=frame_bgr,
             conf=self.conf_threshold,
+            iou=self.nms_iou,
             device=self.device,
             classes=self.class_ids,
             imgsz=self.imgsz,
+            augment=self.augment,
             verbose=False,
         )
         if not results:
