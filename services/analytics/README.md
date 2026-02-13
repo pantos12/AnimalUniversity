@@ -2,7 +2,10 @@
 
 Runs detection, tracking, and behavior logic over frames.
 
-## Plan
-- Plug in a detector (YOLO/RT-DETR)
-- Track with ByteTrack/DeepSORT
-- Emit behavior events to EventBridge
+## Current runtime
+- Detector: Ultralytics YOLO (`services/analytics/detector.py`)
+- Tracker: lightweight IoU tracker (`services/analytics/tracker.py`)
+- Behavior: pacing detector (`services/analytics/behavior.py`)
+
+## Live entrypoint
+Use `scripts/au_live.py` to run RTSP ingest + analytics + optional EventBridge send.

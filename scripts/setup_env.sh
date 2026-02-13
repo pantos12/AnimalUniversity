@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON="${PYTHON:-python}"
+PYTHON="${PYTHON:-python3}"
 
 echo "Creating venv (.venv)..."
 $PYTHON -m venv .venv
