@@ -105,3 +105,40 @@ python scripts/au_train.py \
   --batch 8 \
   --out "data/runs/train"
 ```
+
+## Species-level training from local video frames
+Build a multi-class species dataset (bird/cat/dog/horse/sheep/cow/elephant/bear/zebra/giraffe)
+from extracted frames using pseudo-labeling:
+
+```bash
+python scripts/au_bootstrap_species.py \
+  --frame-dirs data/frames/videoplayback_s1 data/frames/videoplayback_s2 data/frames/videoplayback_s3 data/frames/videoplayback_s4 \
+  --out data/datasets/videoplayback_species_bootstrap \
+  --weights models/yolo/yolov8n.pt \
+  --device cpu
+```
+
+Then train species model:
+
+```bash
+python scripts/au_train.py \
+  --dataset data/datasets/videoplayback_species_bootstrap \
+  --weights models/yolo/yolov8n.pt \
+  --epochs 20 \
+  --imgsz 640 \
+  --batch 8 \
+  --out data/runs/train_species
+```
+
+## Realtime visual demo (screenshot-style)
+The Streamlit app now renders a styled demo page with:
+- bold headline + bullet summary
+- colorful per-species overlay labels
+- ellipse outlines and track IDs
+- summary cards and JSON metrics
+
+Run:
+
+```powershell
+.\scripts\run_ui.ps1
+```
