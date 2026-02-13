@@ -127,7 +127,7 @@ class YoloDetector:
             raise FileNotFoundError(f"weights not found: {self.weights_path}")
         self._model = YOLO(str(self.weights_path))
         self.conf_threshold = conf_threshold
-        self.device = device
+        self.device = device or _resolve_ultralytics_device()
         self.class_ids = class_ids
         self.imgsz = imgsz
 
@@ -135,7 +135,7 @@ class YoloDetector:
         results = self._model.predict(
             source=frame_bgr,
             conf=self.conf_threshold,
-            device=self.device or "auto",
+            device=self.device,
             classes=self.class_ids,
             imgsz=self.imgsz,
             verbose=False,
@@ -163,3 +163,16 @@ class YoloDetector:
                 )
             )
         return detections
+
+
+def _resolve_ultralytics_device() -> str:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "0"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"

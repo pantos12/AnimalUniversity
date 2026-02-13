@@ -42,15 +42,32 @@ def train_yolo(
         raise FileNotFoundError(f"weights not found: {weights}")
 
     model = YOLO(str(weights))
+    selected_device = _resolve_ultralytics_device(device)
     result = model.train(
         data=str(dataset_dir / "dataset.yaml"),
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
-        device=device or "auto",
+        device=selected_device,
         project=str(output_dir),
         name=f"yolo_{mode}",
         verbose=True,
     )
 
     return Path(result.save_dir)
+
+
+def _resolve_ultralytics_device(device: Optional[str]) -> str:
+    if device:
+        return device
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return "0"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
