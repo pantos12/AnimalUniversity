@@ -1,5 +1,6 @@
 ultralytics==8.2.103
 opencv-python==4.10.0.84
+supervision>=0.22.0,<1.0.0
 ffmpeg-python==0.2.0
 numpy==1.26.4
 pandas==2.2.2

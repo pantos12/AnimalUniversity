@@ -31,3 +31,8 @@ models/*
 # OS
 .DS_Store
 Thumbs.db
+
+# SQLite runtime files
+*.db
+*.db-shm
+*.db-wal
