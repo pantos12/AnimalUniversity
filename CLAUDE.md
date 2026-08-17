@@ -33,11 +33,32 @@ Treat this list as the API. If the UI needs something new from the backend,
 **do not reach into other backend modules** — request the addition and let Codex
 implement it behind this surface.
 
+## Shared knowledge base (required)
+The repository is an Obsidian vault. Shared, versioned knowledge starts at
+`docs/vault/00-index.md`; Git is the source of truth.
+
+Before frontend work:
+1. Read `docs/vault/00-index.md` and the collaboration protocol.
+2. Resolve relevant `OPEN` entries in the backend-to-frontend inbox.
+3. Read the FE/BE contract before boundary work.
+4. Read relevant frontend notes and ADRs.
+
+Before finishing frontend work:
+- Update the relevant frontend-owned note when status, UX assumptions, commands,
+  or contracts changed.
+- Append to the frontend-to-backend inbox when Codex must act or know about an API
+  or behavior expectation.
+- Record durable decisions as ADRs under `docs/vault/decisions/`.
+- Follow vault ownership rules. Never commit secrets, credentials, production
+  camera URLs, sensitive media, absolute private vault paths, or scratch notes.
+
 ## Git workflow
 - Branch from `main` as `feat/frontend-<slug>` (or `fix/frontend-<slug>`).
 - Never commit directly to `main`.
 - Rebase on `origin/main` before opening a PR.
 - One PR per logical change; keep frontend PRs free of backend files.
+- Use a separate worktree from Codex. Never let both agents modify the same working
+  tree concurrently.
 
 ## Running the UI
 ```powershell

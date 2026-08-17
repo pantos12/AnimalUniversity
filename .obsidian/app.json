@@ -1,0 +1,16 @@
+{
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "attachmentFolderPath": "docs/vault/attachments",
+  "showUnsupportedFiles": false,
+  "userIgnoreFilters": [
+    ".venv/",
+    ".git/",
+    "__pycache__/",
+    "node_modules/",
+    "data/",
+    "models/",
+    "animaluniversity/sam2/third_party/"
+  ]
+}

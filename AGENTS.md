@@ -35,11 +35,32 @@ from services.analytics.tracker import Detection, IoUTracker, Track
 New capability the UI needs should be exposed through this surface rather than by
 having the UI import deeper backend modules.
 
+## Shared knowledge base (required)
+The repository is an Obsidian vault. Shared, versioned knowledge starts at
+`docs/vault/00-index.md`; Git is the source of truth.
+
+Before backend work:
+1. Read `docs/vault/00-index.md` and the collaboration protocol.
+2. Resolve relevant `OPEN` entries in the frontend-to-backend inbox.
+3. Read the FE/BE contract before boundary work.
+4. Read relevant backend notes and ADRs.
+
+Before finishing backend work:
+- Update the relevant backend-owned note when status, risks, commands, or contracts
+  changed.
+- Append to the backend-to-frontend inbox when Claude Code must act or know about
+  an API or behavior change.
+- Record durable decisions as ADRs under `docs/vault/decisions/`.
+- Follow vault ownership rules. Never commit secrets, credentials, production
+  camera URLs, sensitive media, absolute private vault paths, or scratch notes.
+
 ## Git workflow
 - Branch from `main` as `feat/backend-<slug>` (or `fix/backend-<slug>`).
 - Never commit directly to `main`.
 - Rebase on `origin/main` before opening a PR.
 - One PR per logical change; keep backend PRs free of frontend files.
+- Use a separate worktree from Claude Code. Never let both agents modify the same
+  working tree concurrently.
 
 ## Notes
 - Submodule `animaluniversity/sam2/third_party/segment-anything-2` is **not
