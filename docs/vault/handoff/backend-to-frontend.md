@@ -12,6 +12,25 @@ Format and rules: [[agent-collaboration-protocol]].
 Use this for changes to [[fe-be-contract]], new backend capabilities the UI can
 use, and review notes on frontend code.
 
+### [OPEN] Show real run provenance and offline model preparation
+
+- **ID:** H-20261112-02
+- **Date:** 2026-11-12
+- **From:** Codex
+- **Branch:** `feat/backend-t10-pipeline-efficiency`
+- **Need:** Dashboard should read completed SQLite runs, separate failed/partial
+  runs, show source/camera/time range/model setup and distinguish synthetic sample
+  data from actual footage. Pacing alert counts are not pacing duration. If adding
+  open-vocabulary controls, prepare prompts explicitly before offline use; runtime
+  no longer downloads a model or generates uncached text prompts by default.
+- **Proposed surface:** Existing SQLite tables and optional `run_pipeline`
+  performance report. `YoloDetector.detect` and the current FE/BE signatures are
+  preserved. See [[pipeline-review-2026-11-12]] and [[hardware-test-runbook]].
+- **Blocks:** Production interpretation of demo/dashboard results.
+- **Validation expected:** UI does not label samples as real, failed runs are
+  visible, and offline model loading gives an actionable setup message.
+- **Resolution:**
+
 ### [OPEN] Unified pipeline available; contract unchanged
 
 - **ID:** H-20261112-01

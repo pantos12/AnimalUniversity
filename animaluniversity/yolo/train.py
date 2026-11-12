@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import Literal, Optional
 
 
@@ -26,9 +27,14 @@ def train_yolo(
     Outputs:
     - path to run artifacts directory
     """
-    from ultralytics import YOLO
-
     dataset_dir = Path(dataset_dir)
+    manifest_path = dataset_dir / "dataset_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if any(row.get("status") != "complete" for row in manifest["recordings"].values()):
+            raise ValueError("Auto-label dataset contains an incomplete recording; recover it before training")
+        if any(not any((dataset_dir / "images" / part).glob("*.jpg")) for part in ("train", "val")):
+            raise ValueError("Auto-label dataset needs independent train and val recordings before training")
     if output_dir is None:
         output_dir = dataset_dir / "runs"
 
@@ -40,6 +46,8 @@ def train_yolo(
     weights = Path(weights)
     if not weights.exists():
         raise FileNotFoundError(f"weights not found: {weights}")
+
+    from ultralytics import YOLO
 
     model = YOLO(str(weights))
     selected_device = _resolve_ultralytics_device(device)

@@ -6,35 +6,42 @@ updated: 2026-11-12
 
 # Vision Model Choices
 
-What we use, what we looked at, and how each claim was checked. Update this
-note when a model is tried on real footage; put measured results in
-[[verification-record]].
+## Status and evidence
 
-## In use
+No model is validated for production animal accuracy. The previous note's
+"in use" heading described implementation choices, not executed inference.
+Codex has now executed YOLOE-26 small segmentation and small/nano boxes-only
+variants on synthetic frames with cached lion prompts, CPU only. See
+[[pipeline-review-2026-11-12]] for the six measured configurations and limits.
 
-| Role | Choice | Why |
+| Role | Candidate | Evidence / next decision |
 | --- | --- | --- |
-| Bootstrap detection and auto-labeling | YOLOE (`yoloe-26s-seg.pt`) through `OpenVocabDetector` | Detects named species with no training; same library as the runtime model |
-| Production detection | Fine-tuned YOLO checkpoint through `YoloDetector` (start from `yolo26s.pt`) | Fast, and accurate on our own cameras once trained on them |
-| Tracking | `MotionTracker` (in repo, no dependencies) | Holds identity at about 5 fps and through missed detections |
+| Initial box detection | Prepared YOLOE-26 small, boxes only | Local preparation and inference ran; 34.046 median FPS at batch 4 on a short synthetic clip; real-animal accuracy unmeasured |
+| Lower compute | Prepared YOLOE-26 nano, boxes only | 66.866 median FPS at batch 4 on the same workload; evaluate recall before selecting |
+| Site-tuned detection | YOLO26 small/medium | Candidate for RTX 3080 evaluation after independent labels; not trained or run here |
+| Tracking | Existing MotionTracker | Synthetic regression unchanged; identity across real occlusion unverified |
 
-Checked on 2026-11-12 by inspecting the published `ultralytics` 8.4.211
-package: it contains `YOLOE`, the `yoloe-26` and `yolo26` model families, SAM 3
-(`models/sam/sam3`), and tracker configs for BoT-SORT, ByteTrack, OC-SORT and
-others. **None of these were executed here.**
+Inspected and executed Ultralytics 8.4.211. Runtime takes local weights and
+matching cached prompts, or a prepared checkpoint. Setup is explicit through
+`au_prepare_model.py`; `au_doctor.py` checks the actual hardware. The full
+repository requirements, UI and training upgrade are still T1 work.
 
-## Considered, not adopted yet
+## Alternatives to evaluate
 
-- **SAM 3 text prompts** for labeling: masks rather than boxes; heavier.
-  Revisit if segmentation or pose becomes necessary.
-- **`trackers` package / BoT-SORT with ReID:** stronger identity over long
-  gaps; needs `numpy>=2`. Revisit if ID switches show up in evaluation.
-- **Wildlife-specific models** (`PytorchWildlife`/MegaDetector, `speciesnet`):
-  built for camera-trap stills; worth a comparison in T4 for unusual species.
-- **Vision-language model for behavior:** only as a reviewer of flagged events,
-  never per frame.
+- [YOLOE documentation](https://docs.ultralytics.com/models/yoloe/) documents
+  cached prompts and a matching boxes-only architecture; both paths were
+  checked against the installed package.
+- [YOLO26](https://docs.ultralytics.com/models/yolo26/) is the fine-tuning
+  candidate. Site-tuning is a hypothesis to test, not guaranteed accuracy.
+- [MegaDetector V6](https://github.com/microsoft/MegaDetector) detects animals,
+  people and vehicles, not species. Compare it for known-species enclosures.
+- [SpeciesNet](https://github.com/google/cameratrapai) classifies camera-trap
+  images; validate transfer to zoo video before adding it to the pipeline.
+- [SAM 3](https://github.com/facebookresearch/sam3) is a segmentation/labeling
+  candidate if masks are needed. It has not been integrated or run here.
+- ReID and video-language reviewers remain evaluation candidates for identity
+  gaps and flagged events, respectively; they are not measured improvements.
 
-## Rules for this note
-
-Name the version you checked and how. Do not list a model as "in use" until it
-has run on our hardware.
+Do not choose models from synthetic FPS alone or claim animal behavior accuracy
+from a bright-square clip. Use independent camera/day validation groups, T3
+metrics, day/night examples and observed deployment-device memory use.

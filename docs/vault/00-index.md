@@ -39,17 +39,22 @@ Each agent writes one inbox and reads the other:
 - [[adr-001-agent-ownership-split]]
 - [[adr-002-offline-milestone-ingest-first]]
 - [[adr-003-unified-pipeline-and-open-vocab-bootstrap]] (proposed)
+- [[adr-004-offline-models-and-recording-splits]] (proposed)
 - Template: [[_adr-template]]
 
 ## Knowledge
 
 - [[system-overview]]
 - [[vision-models]] - which models, why, and how each claim was checked
+- [[pipeline-review-2026-11-12]] - fixes, synthetic benchmarks and remaining risks
+- [[hardware-test-runbook]] - Mac M5 and NVIDIA test commands
 - [[verification-record]] - what has actually been run, and what has not
 
 ## Session logs
 
 Newest first. Every working session adds one under `docs/vault/log/`.
+
+- [[2026-11-12-codex-efficiency-review]]
 
 - [[2026-11-12-claude-review-and-unified-pipeline]]
 

@@ -8,6 +8,7 @@ and evaluation; live uses the same logic once it is trusted.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -49,6 +50,13 @@ class FrameSource:
         return None
 
 
+def _validate_sampling(target_fps: Optional[float], max_frames: Optional[int]) -> None:
+    if target_fps is not None and (not math.isfinite(target_fps) or target_fps <= 0):
+        raise ValueError("target_fps must be finite and positive")
+    if max_frames is not None and (not isinstance(max_frames, int) or max_frames < 1):
+        raise ValueError("max_frames must be a positive integer")
+
+
 class VideoFileSource(FrameSource):
     """Archived footage. Timestamps come from the video itself, so runs repeat exactly.
 
@@ -64,8 +72,9 @@ class VideoFileSource(FrameSource):
         info: Optional[SourceInfo] = None,
         max_frames: Optional[int] = None,
     ) -> None:
+        _validate_sampling(target_fps, max_frames)
         self.video_path = Path(video_path)
-        if not self.video_path.exists():
+        if not self.video_path.is_file():
             raise FileNotFoundError(f"Video not found: {self.video_path}")
         if start_time is not None and start_time.tzinfo is None:
             raise ValueError("start_time must be timezone-aware")
@@ -78,11 +87,11 @@ class VideoFileSource(FrameSource):
         import cv2
 
         cap = cv2.VideoCapture(str(self.video_path))
-        if not cap.isOpened():
-            raise RuntimeError(f"Unable to open video: {self.video_path}")
         try:
+            if not cap.isOpened():
+                raise RuntimeError(f"Unable to open video: {self.video_path}")
             native_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
-            if native_fps <= 0:
+            if not math.isfinite(native_fps) or native_fps <= 0:
                 logger.warning("Video reports no frame rate; assuming 25 fps: %s", self.video_path)
                 native_fps = 25.0
             step_s = 1.0 / self.target_fps if self.target_fps and self.target_fps > 0 else 0.0
@@ -90,7 +99,8 @@ class VideoFileSource(FrameSource):
             source_frame = 0
             yielded = 0
             while True:
-                # grab() skips the costly decode for frames we are not going to use
+                # Avoid retrieving/converting unused images. Compressed video
+                # decoding during grab() is backend-dependent.
                 if not cap.grab():
                     break
                 timestamp_s = source_frame / native_fps
@@ -148,7 +158,7 @@ def milestone_export_source(
     )
     return VideoFileSource(
         video_path,
-        target_fps=target_fps or recording.fps,
+        target_fps=recording.fps if target_fps is None else target_fps,
         start_time=recording.start_time,
         info=info,
         max_frames=max_frames,
@@ -180,10 +190,13 @@ class RtspSource(FrameSource):
         max_frames: Optional[int] = None,
         capture_factory: Optional[Callable[[str], Any]] = None,
     ) -> None:
+        _validate_sampling(target_fps, max_frames)
         if not url:
             raise ValueError("RTSP url is required")
+        if not math.isfinite(reconnect_seconds) or reconnect_seconds <= 0:
+            raise ValueError("reconnect_seconds must be finite and positive")
         self.url = url
-        self.target_fps = max(target_fps, 0.1)
+        self.target_fps = target_fps
         self.reconnect_seconds = reconnect_seconds
         self.max_frames = max_frames
         # Never put the URL in SourceInfo: it can contain camera credentials.

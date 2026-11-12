@@ -61,6 +61,8 @@ def build_parser() -> argparse.ArgumentParser:
     det.add_argument("--conf", type=float, default=0.25)
     det.add_argument("--imgsz", type=int, default=640)
     det.add_argument("--device", default=None)
+    det.add_argument("--prompt-embeddings", help="Cached YOLOE .npz prompts matching the checkpoint and classes.")
+    det.add_argument("--batch-size", type=int, default=1, help="Archived inference batch size; live requires 1.")
 
     beh = p.add_argument_group("tracking and behavior")
     beh.add_argument("--tracker", choices=["motion", "iou"], default="motion")
@@ -74,12 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--emit-events", action="store_true", help="Send behavior events to XProtect.")
     out.add_argument("--source-id", help="Camera name/address as XProtect knows it.")
     out.add_argument("--log-every", type=int, default=50)
+    out.add_argument("--profile", action="store_true", help="Include measured stage times and throughput in the report.")
     return p
 
 
 def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     args = build_parser().parse_args(argv)
+    os.environ.setdefault("YOLO_OFFLINE", "true")
+    os.environ.setdefault("YOLO_AUTOINSTALL", "false")
 
     from animaluniversity.pipeline import (
         RtspSource,
@@ -96,6 +101,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     chosen = [bool(args.video), bool(args.milestone_manifest), bool(rtsp_url)]
     if sum(chosen) != 1:
         logger.error("Choose exactly one source: --video, --milestone-manifest or --rtsp-url.")
+        return 2
+    if args.batch_size < 1 or (rtsp_url and args.batch_size != 1):
+        logger.error("--batch-size must be positive; live sources require --batch-size 1.")
         return 2
 
     if args.video:
@@ -130,6 +138,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             conf_threshold=args.conf,
             device=args.device,
             imgsz=args.imgsz,
+            prompt_embeddings=args.prompt_embeddings,
         )
         logger.info("Detector: open-vocabulary, classes=%s", classes)
 
@@ -152,6 +161,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         sinks=sinks,
         zone=zone,
         log_every=args.log_every,
+        batch_size=args.batch_size,
+        profile=args.profile,
     )
 
     logger.info(

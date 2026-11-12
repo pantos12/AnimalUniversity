@@ -27,6 +27,7 @@ models/*
 *.engine
 *.ckpt
 *.safetensors
+mobileclip*.ts
 
 # OS
 .DS_Store

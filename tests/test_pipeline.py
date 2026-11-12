@@ -176,17 +176,18 @@ def test_detections_from_result_accepts_arrays() -> None:
 def test_autolabel_builds_trainable_dataset(pacing_video: Path, tmp_path: Path) -> None:
     out = tmp_path / "dataset"
     result = autolabel_video(
-        VideoFileSource(pacing_video, target_fps=1), BrightBlobDetector(label="lion"), ["lion"], out
+        VideoFileSource(pacing_video, target_fps=1), BrightBlobDetector(label="lion"), ["lion"], out,
+        split="train",
     )
     assert result["frames_kept"] >= 35 and result["boxes_per_class"]["lion"] >= 35
     images = sorted((out / "images").rglob("*.jpg"))
     labels = sorted((out / "labels").rglob("*.txt"))
     assert len(images) == len(labels) == result["frames_kept"]
-    assert (out / "images" / "val").exists() and any((out / "images" / "val").iterdir())
+    assert (out / "images" / "val").exists() and not any((out / "images" / "val").iterdir())
     cls, xc, yc, w, h = labels[0].read_text().split()
     assert cls == "0" and all(0.0 <= float(v) <= 1.0 for v in (xc, yc, w, h))
     assert abs(float(w) - 60 / 640) < 0.01 and abs(float(h) - 60 / 360) < 0.01
-    assert "names:\n  - lion" in (out / "dataset.yaml").read_text()
+    assert 'names:\n  - "lion"' in (out / "dataset.yaml").read_text()
     assert any((out / "review").iterdir())
 
 

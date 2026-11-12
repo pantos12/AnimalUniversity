@@ -8,21 +8,52 @@ Animal behavior analytics for Milestone XProtect cameras, on archived footage an
 check results on archived footage, then point the same command at a live stream.
 
 ```bash
-# 1. Archived clip, no trained model yet: name the species (open-vocabulary detection)
+# 0. Connected setup once: cache prompts and remove masks when only boxes are used.
+# Install the optional tokenizer from its official source if not installed:
+python -m pip install https://github.com/ultralytics/CLIP/archive/refs/heads/main.zip
+python scripts/au_prepare_model.py --weights yoloe-26s-seg.pt --classes "lion" \
+  --out models/yoloe-26s-lion.pt --boxes-only --allow-download
+
+# 1. Offline archived inference, using the prepared checkpoint.
 python scripts/au_run.py --video data/raw_videos/lion_yard.mp4 --classes "lion" \
+  --open-vocab-weights models/yoloe-26s-lion.pt --batch-size 4 --profile \
   --db data/au.db --report-json data/runs/lion_yard.json
 
-# 2. Milestone export (MP4 + JSON manifest): stores real-world time, camera, enclosure
-python scripts/au_run.py --milestone-manifest data/milestone_drop/rec.json --classes "lion" --db data/au.db
+# 2. Milestone export: real-world timestamps, camera and enclosure.
+python scripts/au_run.py --milestone-manifest data/milestone_drop/rec.json --classes "lion" \
+  --open-vocab-weights models/yoloe-26s-lion.pt --db data/au.db
 
-# 3. Build a training set from archived footage, review data/datasets/site_v1/review, then train
-python scripts/au_autolabel.py --video data/raw_videos/lion_yard.mp4 --classes "lion" --out data/datasets/site_v1
-python scripts/au_train.py --dataset data/datasets/site_v1 --weights yolo26s.pt --epochs 50 --out data/runs/train
+# 3. Build train and validation sets from independent recording groups.
+python scripts/au_autolabel.py --video data/raw_videos/lion_day1.mp4 --classes "lion" \
+  --weights models/yoloe-26s-lion.pt --out data/datasets/site_v2 \
+  --recording-id lion_day1 --split-group camera1_day1 --split train
+python scripts/au_autolabel.py --video data/raw_videos/lion_day2.mp4 --classes "lion" \
+  --weights models/yoloe-26s-lion.pt --out data/datasets/site_v2 \
+  --recording-id lion_day2 --split-group camera1_day2 --split val
+# Review the pseudo-labels first. Pre-cache training weights locally as well.
+python scripts/au_train.py --dataset data/datasets/site_v2 --weights models/yolo26s.pt --epochs 50
 
-# 4. Live, with the model you trained, sending pacing events to XProtect
+# 4. Check usable hardware; live sources retain batch size 1.
+python scripts/au_doctor.py
 python scripts/au_run.py --rtsp-url "rtsp://<stream>" --weights models/yolo/best.pt --emit-events \
   --source-id "<camera name in XProtect>" --db data/au.db
 ```
+
+Change "lion" to the common species names you actually need and prepare that
+class list once. Runtime uses local weights and cached prompts; the CLI disables
+Ultralytics network checks and automatic dependency installation by default.
+Batching is optional for archived clips and does not change frame timestamps or
+tracker update order. `--profile` records measured throughput and stage timings.
+
+Auto-labeling keeps each recording group entirely in one split, locks class
+order, refuses repeated recordings and checks image-write failures. Legacy
+outputs without `dataset_manifest.json` need a new output directory. Neighboring
+frames from one clip do not provide independent validation. Empty detections are
+not treated as background labels unless explicitly requested and reviewed.
+
+Mac M5 and NVIDIA setup: `docs/vault/backend/hardware-test-runbook.md`.
+Review findings and measured model options:
+`docs/vault/backend/pipeline-review-2026-11-12.md`.
 
 Results land in SQLite (`runs`, `track_points`, `behavior_events`), for example:
 
@@ -34,7 +65,8 @@ FROM behavior_events WHERE name = 'pacing' GROUP BY hour ORDER BY hour;
 Design and rationale: `docs/vault/decisions/adr-003-unified-pipeline-and-open-vocab-bootstrap.md`.
 Run the tests with `pytest`.
 
-The sections below describe the earlier, separate scripts. They still work.
+The sections below describe the earlier scripts. They remain available, but
+compatibility with the upgraded model dependencies still needs the T1 checks.
 
 ## Structure
 - `services/ingest` RTSP ingest + frame pipeline
@@ -45,15 +77,16 @@ The sections below describe the earlier, separate scripts. They still work.
 - `data` local dev data (ignored by git)
 
 ## Recommended model plan
-For production on live XProtect feeds:
 
-1. Start with `ENA24` (or your best current YOLO checkpoint) for immediate live detection.
-2. Collect site-specific frames from your cameras.
-3. Use `SAM2` for fast pseudo-labeling, then convert to YOLO dataset and fine-tune.
-4. Deploy the fine-tuned YOLO checkpoint for runtime.
-5. `SAM3` is currently treated as the same train-first workflow (SAM2 fallback path in code).
+Use a prepared YOLOE-26 small checkpoint for initial box detection. Compare a
+site-tuned YOLO26 model on held-out camera/day recordings before selecting a
+production model. Nano is a speed candidate for the Mac; the RTX 3080 should be
+benchmarked with small and medium models once real footage is available.
 
-This gives fast startup and better long-term accuracy.
+SAM 3 is an optional labeling/segmentation candidate if masks are needed;
+MegaDetector V6 is an animal-detection baseline worth comparing on zoo footage.
+Neither is proven more accurate on this project yet. Existing legacy `sam3`
+selectors still route to the SAM2-assisted workflow and do not run SAM 3.
 
 ## Local quickstart
 1. Create and activate a virtual environment, then install deps.

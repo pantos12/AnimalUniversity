@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -29,6 +29,13 @@ class MilestoneRecordingManifest(BaseModel):
     notes: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("camera_id", "camera_name", "enclosure_id")
+    @classmethod
+    def _validate_identifier(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("identifier must be non-empty")
+        return value
 
     @field_validator("fps")
     @classmethod
@@ -55,7 +62,8 @@ class MilestoneRecordingManifest(BaseModel):
     @field_validator("video_filename")
     @classmethod
     def _validate_video_filename(cls, value: str) -> str:
-        if Path(value).name != value:
+        if (not value or value in {".", ".."} or "\x00" in value
+                or Path(value).name != value or PureWindowsPath(value).name != value):
             raise ValueError("video_filename must be a file name, not a path")
         return value
 

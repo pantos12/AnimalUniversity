@@ -1,4 +1,4 @@
-ultralytics>=8.4.0,<9
+ultralytics>=8.4.211,<9
 opencv-python==4.10.0.84
 supervision>=0.22.0,<0.31
 ffmpeg-python==0.2.0

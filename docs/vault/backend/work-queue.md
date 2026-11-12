@@ -19,6 +19,32 @@ Tasks marked **needs Djuro** cannot be finished by an agent alone.
 
 ---
 
+## Review requested by Djuro
+
+### T10. Review unified pipeline reliability, efficiency and model choices
+- **Status:** IN REVIEW https://github.com/pantos12/AnimalUniversity/pull/4
+- **Do:** Review PR #3, reproduce correctness/resource issues, improve offline
+  model preparation and archived inference efficiency, and document model
+  candidates using official sources and measured results where available.
+- **Done when:** Regression tests pass, CPU benchmark evidence is recorded,
+  model claims distinguish execution from recommendation, and a review PR lists
+  what still needs representative animal footage. Keep frontend implementation
+  untouched and preserve existing public call signatures.
+
+### T11. Harden long-running sources, timing and event delivery
+- **Status:** TODO
+- **Why:** The PR #3 review found remaining production risks outside the offline
+  efficiency pass; see [[pipeline-review-2026-11-12]].
+- **Do:** Verify decoder PTS for variable-frame-rate clips; carry capture-time
+  timestamps through live frames; handle RTSP open/read thread errors and release
+  failed captures; bound report memory over long runs; move blocking Event Server
+  sends to a durable SQLite outbox with explicit delivery state.
+- **Done when:** Tests cover VFR/gaps/reconnects and outbox retries; an hour-long
+  multi-source soak has bounded memory and measured end-to-end latency; actual
+  Event Server acceptance remains T5. Preserve offline operation.
+
+---
+
 ## P0: prove it on real hardware and real footage
 
 ### T1. First run on a real machine
