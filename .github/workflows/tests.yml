@@ -20,4 +20,4 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
           pip install numpy opencv-python-headless pydantic pytest
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q
