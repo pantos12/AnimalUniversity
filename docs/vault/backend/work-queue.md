@@ -19,6 +19,20 @@ Tasks marked **needs Djuro** cannot be finished by an agent alone.
 
 ---
 
+## Review requested by Djuro
+
+### T10. Review unified pipeline reliability, efficiency and model choices
+- **Status:** CLAIMED Codex feat/backend-t10-pipeline-efficiency 2026-11-12
+- **Do:** Review PR #3, reproduce correctness/resource issues, improve offline
+  model preparation and archived inference efficiency, and document model
+  candidates using official sources and measured results where available.
+- **Done when:** Regression tests pass, CPU benchmark evidence is recorded,
+  model claims distinguish execution from recommendation, and a review PR lists
+  what still needs representative animal footage. Keep frontend implementation
+  untouched and preserve existing public call signatures.
+
+---
+
 ## P0: prove it on real hardware and real footage
 
 ### T1. First run on a real machine
