@@ -45,9 +45,14 @@ class SqliteSink(Sink):
         return self._run_id
 
     def open(self, info: SourceInfo) -> None:
+        if self._conn is not None:
+            raise RuntimeError("SQLite sink is already open")
+        if self._points or self._events:
+            raise RuntimeError("SQLite sink has uncommitted results from a failed run; use a new sink")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.execute("PRAGMA journal_mode = WAL;")
+        self._conn.execute("PRAGMA foreign_keys = ON;")
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS runs (
@@ -103,6 +108,8 @@ class SqliteSink(Sink):
         self._conn.commit()
 
     def write(self, frame: Frame, tracks: Iterable[object], events: Iterable[object]) -> None:
+        if self._conn is None:
+            raise RuntimeError("SQLite sink must be opened before writing")
         wall = frame.wall_time.isoformat() if frame.wall_time else None
         for tr in tracks:
             x1, y1, x2, y2 = tr.bbox_xyxy
@@ -121,26 +128,37 @@ class SqliteSink(Sink):
     def _flush(self) -> None:
         if self._conn is None:
             return
-        if self._points:
-            self._conn.executemany(
-                "INSERT INTO track_points VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", self._points
-            )
-            self._points.clear()
-        if self._events:
-            self._conn.executemany(
-                "INSERT INTO behavior_events VALUES (?, ?, ?, ?, ?, ?, ?, ?);", self._events
-            )
-            self._events.clear()
-        self._conn.commit()
+        # Commit tracks and their events together. Keep both buffers intact on
+        # failure so a retry cannot lose points or duplicate half a batch.
+        with self._conn:
+            if self._points:
+                self._conn.executemany(
+                    "INSERT INTO track_points VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", self._points
+                )
+            if self._events:
+                self._conn.executemany(
+                    "INSERT INTO behavior_events VALUES (?, ?, ?, ?, ?, ?, ?, ?);", self._events
+                )
+        self._points.clear()
+        self._events.clear()
 
     def close(self, status: str = "completed") -> None:
         if self._conn is None:
             return
-        self._flush()
-        self._conn.execute("UPDATE runs SET status = ? WHERE id = ?;", (status, self._run_id))
-        self._conn.commit()
-        self._conn.close()
-        self._conn = None
+        try:
+            self._flush()
+            with self._conn:
+                self._conn.execute("UPDATE runs SET status = ? WHERE id = ?;", (status, self._run_id))
+        except Exception:
+            try:
+                with self._conn:
+                    self._conn.execute("UPDATE runs SET status = 'failed' WHERE id = ?;", (self._run_id,))
+            except Exception as exc:
+                logger.error("Could not mark SQLite run failed: %s", exc)
+            raise
+        finally:
+            self._conn.close()
+            self._conn = None
 
 
 class XProtectEventSink(Sink):

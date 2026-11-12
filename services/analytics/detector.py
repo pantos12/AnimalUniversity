@@ -122,11 +122,11 @@ class YoloDetector:
         augment: bool = False,
         nms_iou: float = 0.7,
     ) -> None:
+        self.weights_path = Path(weights_path)
+        if not self.weights_path.is_file():
+            raise FileNotFoundError(f"weights not found: {self.weights_path}")
         from ultralytics import YOLO
 
-        self.weights_path = Path(weights_path)
-        if not self.weights_path.exists():
-            raise FileNotFoundError(f"weights not found: {self.weights_path}")
         self._model = YOLO(str(self.weights_path))
         self.conf_threshold = conf_threshold
         self.device = device or _resolve_ultralytics_device()
@@ -136,8 +136,14 @@ class YoloDetector:
         self.nms_iou = nms_iou
 
     def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
+        results = self.detect_batch([frame_bgr])
+        return results[0] if results else []
+
+    def detect_batch(self, frames: List[np.ndarray]) -> List[List[Detection]]:
+        if not frames:
+            return []
         results = self._model.predict(
-            source=frame_bgr,
+            source=frames,
             conf=self.conf_threshold,
             iou=self.nms_iou,
             device=self.device,
@@ -146,9 +152,7 @@ class YoloDetector:
             augment=self.augment,
             verbose=False,
         )
-        if not results:
-            return []
-        return detections_from_result(results[0])
+        return [detections_from_result(result) for result in results]
 
 
 def _to_list(value) -> list:
@@ -193,11 +197,12 @@ class OpenVocabDetector:
     - Automatic labeling of archived footage to build a fine-tuning dataset
       (see ``animaluniversity.labeling.autolabel``).
 
-    A fine-tuned ``YoloDetector`` will still be faster and more accurate on your
-    own cameras; this is the bootstrap, not the end state.
+    A site-tuned ``YoloDetector`` is a candidate for production; compare both on
+    held-out recordings before choosing it.
 
-    Requires ``ultralytics>=8.4``. Weights download on first use, so the first
-    run needs internet access (or place the file under ``models/``).
+    Runtime requires local weights and cached prompt embeddings (or a checkpoint
+    already prepared for exactly these classes). Use ``scripts/au_prepare_model.py``
+    on a connected machine first. No weight or text-encoder downloads by default.
     """
 
     DEFAULT_WEIGHTS = "yoloe-26s-seg.pt"
@@ -210,10 +215,22 @@ class OpenVocabDetector:
         device: Optional[str] = None,
         imgsz: int = 640,
         nms_iou: float = 0.7,
+        prompt_embeddings: Optional[str | Path] = None,
+        allow_download: bool = False,
     ) -> None:
         classes = [c.strip() for c in classes if c and c.strip()]
         if not classes:
             raise ValueError("OpenVocabDetector needs at least one class name, e.g. ['tiger']")
+        if len(set(classes)) != len(classes):
+            raise ValueError("Class names must be unique")
+        self.weights_path = Path(weights_path) if weights_path else Path(self.DEFAULT_WEIGHTS)
+        if not self.weights_path.is_file() and not allow_download:
+            raise FileNotFoundError(
+                f"Local weights not found: {self.weights_path}. Use scripts/au_prepare_model.py "
+                "to prepare local weights and prompts before running offline."
+            )
+        if prompt_embeddings is not None and not Path(prompt_embeddings).is_file():
+            raise FileNotFoundError(f"Cached prompt embeddings not found: {prompt_embeddings}")
         try:
             from ultralytics import YOLOE
         except ImportError as exc:
@@ -223,26 +240,39 @@ class OpenVocabDetector:
             ) from exc
 
         self.classes = classes
-        self.weights_path = Path(weights_path) if weights_path else Path(self.DEFAULT_WEIGHTS)
         self._model = YOLOE(str(self.weights_path))
-        self._model.set_classes(classes)
+        if prompt_embeddings is not None:
+            self._model.load_prompt_embeddings(str(prompt_embeddings))
+        names = self._model.names
+        names = [names[key] for key in sorted(names)] if isinstance(names, dict) else list(names)
+        if names != classes:
+            if not allow_download or prompt_embeddings is not None:
+                raise ValueError(
+                    "Cached prompt classes must match --classes in the same order. "
+                    "Use scripts/au_prepare_model.py to prepare the requested prompts."
+                )
+            self._model.set_classes(classes)
         self.conf_threshold = conf_threshold
         self.device = device or _resolve_ultralytics_device()
         self.imgsz = imgsz
         self.nms_iou = nms_iou
 
     def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
+        results = self.detect_batch([frame_bgr])
+        return results[0] if results else []
+
+    def detect_batch(self, frames: List[np.ndarray]) -> List[List[Detection]]:
+        if not frames:
+            return []
         results = self._model.predict(
-            source=frame_bgr,
+            source=frames,
             conf=self.conf_threshold,
             iou=self.nms_iou,
             device=self.device,
             imgsz=self.imgsz,
             verbose=False,
         )
-        if not results:
-            return []
-        return detections_from_result(results[0])
+        return [detections_from_result(result) for result in results]
 
 
 def _resolve_ultralytics_device() -> str:

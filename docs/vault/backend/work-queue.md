@@ -31,6 +31,18 @@ Tasks marked **needs Djuro** cannot be finished by an agent alone.
   what still needs representative animal footage. Keep frontend implementation
   untouched and preserve existing public call signatures.
 
+### T11. Harden long-running sources, timing and event delivery
+- **Status:** TODO
+- **Why:** The PR #3 review found remaining production risks outside the offline
+  efficiency pass; see [[pipeline-review-2026-11-12]].
+- **Do:** Verify decoder PTS for variable-frame-rate clips; carry capture-time
+  timestamps through live frames; handle RTSP open/read thread errors and release
+  failed captures; bound report memory over long runs; move blocking Event Server
+  sends to a durable SQLite outbox with explicit delivery state.
+- **Done when:** Tests cover VFR/gaps/reconnects and outbox retries; an hour-long
+  multi-source soak has bounded memory and measured end-to-end latency; actual
+  Event Server acceptance remains T5. Preserve offline operation.
+
 ---
 
 ## P0: prove it on real hardware and real footage
