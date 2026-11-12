@@ -1,0 +1,23 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The test suite needs no GPU, weights or torch: models are loaded lazily
+      # and tests use synthetic clips. Keep it that way so CI stays fast.
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          pip install numpy opencv-python-headless pydantic pytest
+      - name: Run tests
+        run: python -m pytest -q

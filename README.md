@@ -1,6 +1,40 @@
 # AnimalUniversity
 
-Animal behavior analytics from Milestone XProtect live feeds.
+Animal behavior analytics for Milestone XProtect cameras, on archived footage and live feeds.
+
+## Start here: one pipeline, archived or live
+
+`scripts/au_run.py` runs detect -> track -> behavior on any source. Develop and
+check results on archived footage, then point the same command at a live stream.
+
+```bash
+# 1. Archived clip, no trained model yet: name the species (open-vocabulary detection)
+python scripts/au_run.py --video data/raw_videos/lion_yard.mp4 --classes "lion" \
+  --db data/au.db --report-json data/runs/lion_yard.json
+
+# 2. Milestone export (MP4 + JSON manifest): stores real-world time, camera, enclosure
+python scripts/au_run.py --milestone-manifest data/milestone_drop/rec.json --classes "lion" --db data/au.db
+
+# 3. Build a training set from archived footage, review data/datasets/site_v1/review, then train
+python scripts/au_autolabel.py --video data/raw_videos/lion_yard.mp4 --classes "lion" --out data/datasets/site_v1
+python scripts/au_train.py --dataset data/datasets/site_v1 --weights yolo26s.pt --epochs 50 --out data/runs/train
+
+# 4. Live, with the model you trained, sending pacing events to XProtect
+python scripts/au_run.py --rtsp-url "rtsp://<stream>" --weights models/yolo/best.pt --emit-events \
+  --source-id "<camera name in XProtect>" --db data/au.db
+```
+
+Results land in SQLite (`runs`, `track_points`, `behavior_events`), for example:
+
+```sql
+SELECT substr(wall_time, 1, 13) AS hour, COUNT(*) AS pacing_events
+FROM behavior_events WHERE name = 'pacing' GROUP BY hour ORDER BY hour;
+```
+
+Design and rationale: `docs/vault/decisions/adr-003-unified-pipeline-and-open-vocab-bootstrap.md`.
+Run the tests with `pytest`.
+
+The sections below describe the earlier, separate scripts. They still work.
 
 ## Structure
 - `services/ingest` RTSP ingest + frame pipeline

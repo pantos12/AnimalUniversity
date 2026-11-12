@@ -52,6 +52,12 @@ Before finishing frontend work:
 - Follow vault ownership rules. Never commit secrets, credentials, production
   camera URLs, sensitive media, absolute private vault paths, or scratch notes.
 
+## Work routine (required)
+- Add a session log under `docs/vault/log/` for every working session, with
+  separate "Verified" and "Not verified" lists.
+- Frontend items tracked for visibility sit at the end of
+  `docs/vault/backend/work-queue.md`.
+
 ## Git workflow
 - Branch from `main` as `feat/frontend-<slug>` (or `fix/frontend-<slug>`).
 - Never commit directly to `main`.

@@ -148,27 +148,101 @@ class YoloDetector:
         )
         if not results:
             return []
+        return detections_from_result(results[0])
 
-        result = results[0]
-        boxes = result.boxes
-        if boxes is None:
-            return []
 
-        names = result.names or {}
-        detections: List[Detection] = []
-        for i in range(len(boxes)):
-            xyxy = boxes.xyxy[i].detach().cpu().tolist()
-            conf = float(boxes.conf[i].detach().cpu().item())
-            cls_idx = int(boxes.cls[i].detach().cpu().item())
-            label = str(names.get(cls_idx, cls_idx))
-            detections.append(
-                Detection(
-                    bbox_xyxy=(float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])),
-                    confidence=conf,
-                    label=label,
-                )
+def _to_list(value) -> list:
+    """Convert a torch tensor or numpy array to a plain list."""
+    if hasattr(value, "detach"):
+        value = value.detach()
+    if hasattr(value, "cpu"):
+        value = value.cpu()
+    return value.tolist() if hasattr(value, "tolist") else list(value)
+
+
+def detections_from_result(result) -> List[Detection]:
+    """Convert one Ultralytics result into ``Detection`` objects."""
+    boxes = getattr(result, "boxes", None)
+    if boxes is None or len(boxes) == 0:
+        return []
+    names = getattr(result, "names", None) or {}
+    xyxy = _to_list(boxes.xyxy)
+    conf = _to_list(boxes.conf)
+    cls = _to_list(boxes.cls)
+    detections: List[Detection] = []
+    for box, score, cls_idx in zip(xyxy, conf, cls):
+        cls_idx = int(cls_idx)
+        detections.append(
+            Detection(
+                bbox_xyxy=(float(box[0]), float(box[1]), float(box[2]), float(box[3])),
+                confidence=float(score),
+                label=str(names.get(cls_idx, cls_idx)),
             )
-        return detections
+        )
+    return detections
+
+
+class OpenVocabDetector:
+    """Zero-shot detector: find animals by *name*, with no training.
+
+    Wraps Ultralytics YOLOE (open-vocabulary YOLO). Give it the species you care
+    about, e.g. ``["tiger", "red panda", "keeper"]``, and it detects them
+    directly. Uses:
+
+    - Day-one results on a new enclosure before any site-specific model exists.
+    - Automatic labeling of archived footage to build a fine-tuning dataset
+      (see ``animaluniversity.labeling.autolabel``).
+
+    A fine-tuned ``YoloDetector`` will still be faster and more accurate on your
+    own cameras; this is the bootstrap, not the end state.
+
+    Requires ``ultralytics>=8.4``. Weights download on first use, so the first
+    run needs internet access (or place the file under ``models/``).
+    """
+
+    DEFAULT_WEIGHTS = "yoloe-26s-seg.pt"
+
+    def __init__(
+        self,
+        classes: List[str],
+        weights_path: Optional[str | Path] = None,
+        conf_threshold: float = 0.25,
+        device: Optional[str] = None,
+        imgsz: int = 640,
+        nms_iou: float = 0.7,
+    ) -> None:
+        classes = [c.strip() for c in classes if c and c.strip()]
+        if not classes:
+            raise ValueError("OpenVocabDetector needs at least one class name, e.g. ['tiger']")
+        try:
+            from ultralytics import YOLOE
+        except ImportError as exc:
+            raise RuntimeError(
+                "Open-vocabulary detection needs ultralytics>=8.4 "
+                "(pip install -U 'ultralytics>=8.4')."
+            ) from exc
+
+        self.classes = classes
+        self.weights_path = Path(weights_path) if weights_path else Path(self.DEFAULT_WEIGHTS)
+        self._model = YOLOE(str(self.weights_path))
+        self._model.set_classes(classes)
+        self.conf_threshold = conf_threshold
+        self.device = device or _resolve_ultralytics_device()
+        self.imgsz = imgsz
+        self.nms_iou = nms_iou
+
+    def detect(self, frame_bgr: np.ndarray) -> List[Detection]:
+        results = self._model.predict(
+            source=frame_bgr,
+            conf=self.conf_threshold,
+            iou=self.nms_iou,
+            device=self.device,
+            imgsz=self.imgsz,
+            verbose=False,
+        )
+        if not results:
+            return []
+        return detections_from_result(results[0])
 
 
 def _resolve_ultralytics_device() -> str:
