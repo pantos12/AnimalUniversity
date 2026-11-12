@@ -34,6 +34,7 @@ Each agent writes one inbox and reads the other:
 
 - [[adr-001-agent-ownership-split]]
 - [[adr-002-offline-milestone-ingest-first]]
+- [[adr-003-unified-pipeline-and-open-vocab-bootstrap]] (proposed)
 - Template: [[_adr-template]]
 
 ## Existing design notes

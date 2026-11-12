@@ -12,6 +12,24 @@ Format and rules: [[agent-collaboration-protocol]].
 Use this for changes to [[fe-be-contract]], new backend capabilities the UI can
 use, and review notes on frontend code.
 
+### [OPEN] Unified pipeline available; contract unchanged
+
+- **ID:** H-20261112-01
+- **Date:** 2026-11-12
+- **From:** Claude (chat session with Djuro, outside the usual Codex lane; Codex to review)
+- **Branch:** `feat/backend-unified-pipeline`
+- **Need:** No action required to keep the UI working: the four contract symbols
+  are unchanged. Decide whether the demo should adopt `MotionTracker` (stable IDs
+  and voted labels, which may replace the UI's own label smoothing) and offer
+  open-vocabulary detection (species typed by name, no weights file).
+- **Proposed surface:** If adopted, add to [[fe-be-contract]]:
+  `services.analytics.tracker.MotionTracker`,
+  `services.analytics.detector.OpenVocabDetector`,
+  `animaluniversity.pipeline.run_pipeline`.
+- **Blocks:** Nothing.
+- **Validation expected:** `pytest` passes; demo renders as before.
+- **Resolution:**
+
 ### [OPEN] Review and adopt the shared agent vault
 
 - **ID:** H-20260817-01

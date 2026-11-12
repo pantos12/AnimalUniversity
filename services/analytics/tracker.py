@@ -180,3 +180,185 @@ class IoUTracker(Tracker):
             del self._states[track_id]
 
         return tracks
+
+
+@dataclass
+class _MotionState:
+    bbox_xyxy: Tuple[float, float, float, float]
+    velocity: Tuple[float, float]
+    label_votes: Dict[str, float]
+    score: float
+    hits: int
+    last_seen_frame: int
+
+    @property
+    def label(self) -> str:
+        return max(self.label_votes.items(), key=lambda kv: kv[1])[0]
+
+
+def _shift(
+    bbox: Tuple[float, float, float, float], dx: float, dy: float
+) -> Tuple[float, float, float, float]:
+    return (bbox[0] + dx, bbox[1] + dy, bbox[2] + dx, bbox[3] + dy)
+
+
+def _center(bbox: Tuple[float, float, float, float]) -> Tuple[float, float]:
+    return ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+
+
+def _diag(bbox: Tuple[float, float, float, float]) -> float:
+    return ((bbox[2] - bbox[0]) ** 2 + (bbox[3] - bbox[1]) ** 2) ** 0.5
+
+
+def _area(bbox: Tuple[float, float, float, float]) -> float:
+    return max(0.0, bbox[2] - bbox[0]) * max(0.0, bbox[3] - bbox[1])
+
+
+class MotionTracker(Tracker):
+    """ByteTrack-style tracker with motion prediction and label voting.
+
+    Built for low frame rates (about 5 fps) where an animal can move further than
+    its own body between frames, which defeats plain IoU matching:
+
+    - Each track carries a velocity estimate, and matching is done against the
+      *predicted* box, so a track survives missed detections.
+    - When predicted and detected boxes do not overlap at all, a match is still
+      allowed if the centers are close relative to the box size and the sizes are
+      similar.
+    - Matching ignores the class label. The label reported for a track is a
+      confidence-weighted vote over its history, so a detector that flickers
+      between "bear" and "dog" neither splits the track nor changes its label.
+    - Two-stage association: confident detections are matched first, then
+      low-confidence ones may only extend existing tracks, never start new ones.
+
+    No dependencies beyond the standard library.
+    """
+
+    def __init__(
+        self,
+        iou_threshold: float = 0.2,
+        max_missed: int = 15,
+        high_conf: float = 0.4,
+        center_gate: float = 1.5,
+        velocity_smoothing: float = 0.6,
+    ) -> None:
+        self.iou_threshold = iou_threshold
+        self.max_missed = max_missed
+        self.high_conf = high_conf
+        self.center_gate = center_gate
+        self.velocity_smoothing = velocity_smoothing
+        self._next_id = 1
+        self._frame_idx = 0
+        self._states: Dict[int, _MotionState] = {}
+
+    def _predicted(self, state: _MotionState) -> Tuple[float, float, float, float]:
+        gap = self._frame_idx - state.last_seen_frame
+        return _shift(state.bbox_xyxy, state.velocity[0] * gap, state.velocity[1] * gap)
+
+    def _match_score(self, det: Detection, state: _MotionState) -> float:
+        predicted = self._predicted(state)
+        iou = max(_bbox_iou(det.bbox_xyxy, predicted), _bbox_iou(det.bbox_xyxy, state.bbox_xyxy))
+        if iou >= self.iou_threshold:
+            return 1.0 + iou
+
+        # No usable overlap: fall back to center distance, gated by box size.
+        area_det, area_trk = _area(det.bbox_xyxy), _area(predicted)
+        if area_det <= 0 or area_trk <= 0:
+            return 0.0
+        if not 0.4 <= area_det / area_trk <= 2.5:
+            return 0.0
+        scale = (_diag(det.bbox_xyxy) + _diag(predicted)) / 2.0
+        if scale <= 0:
+            return 0.0
+        (dx, dy), (px, py) = _center(det.bbox_xyxy), _center(predicted)
+        dist = ((dx - px) ** 2 + (dy - py) ** 2) ** 0.5 / scale
+        gap = max(1, self._frame_idx - state.last_seen_frame)
+        gate = self.center_gate * min(gap, 3)
+        if dist > gate:
+            return 0.0
+        return 1.0 - dist / gate
+
+    def _associate(
+        self, dets: List[Detection], det_indices: List[int], track_ids: List[int]
+    ) -> Dict[int, int]:
+        candidates: List[Tuple[float, int, int]] = []
+        for det_idx in det_indices:
+            for track_id in track_ids:
+                score = self._match_score(dets[det_idx], self._states[track_id])
+                if score > 0:
+                    candidates.append((score, det_idx, track_id))
+        candidates.sort(reverse=True)
+        matches: Dict[int, int] = {}
+        used: set[int] = set()
+        for _score, det_idx, track_id in candidates:
+            if det_idx in matches or track_id in used:
+                continue
+            matches[det_idx] = track_id
+            used.add(track_id)
+        return matches
+
+    def update(self, detections: Iterable[Detection]) -> List[Track]:
+        self._frame_idx += 1
+        dets = list(detections)
+        high = [i for i, d in enumerate(dets) if d.confidence >= self.high_conf]
+        low = [i for i, d in enumerate(dets) if d.confidence < self.high_conf]
+
+        track_ids = list(self._states.keys())
+        matches = self._associate(dets, high, track_ids)
+        remaining = [tid for tid in track_ids if tid not in set(matches.values())]
+        matches.update(self._associate(dets, low, remaining))
+
+        tracks: List[Track] = []
+        for det_idx, det in enumerate(dets):
+            track_id = matches.get(det_idx)
+            if track_id is None:
+                if det.confidence < self.high_conf:
+                    continue  # weak detections never start a track
+                track_id = self._next_id
+                self._next_id += 1
+                self._states[track_id] = _MotionState(
+                    bbox_xyxy=det.bbox_xyxy,
+                    velocity=(0.0, 0.0),
+                    label_votes={det.label: det.confidence},
+                    score=det.confidence,
+                    hits=1,
+                    last_seen_frame=self._frame_idx,
+                )
+            else:
+                state = self._states[track_id]
+                gap = max(1, self._frame_idx - state.last_seen_frame)
+                (cx, cy), (px, py) = _center(det.bbox_xyxy), _center(state.bbox_xyxy)
+                observed = ((cx - px) / gap, (cy - py) / gap)
+                if state.hits == 1:
+                    velocity = observed
+                else:
+                    a = self.velocity_smoothing
+                    velocity = (
+                        a * observed[0] + (1 - a) * state.velocity[0],
+                        a * observed[1] + (1 - a) * state.velocity[1],
+                    )
+                state.bbox_xyxy = det.bbox_xyxy
+                state.velocity = velocity
+                state.label_votes[det.label] = state.label_votes.get(det.label, 0.0) + det.confidence
+                state.score = det.confidence
+                state.hits += 1
+                state.last_seen_frame = self._frame_idx
+
+            state = self._states[track_id]
+            tracks.append(
+                Track(
+                    track_id=track_id,
+                    bbox_xyxy=det.bbox_xyxy,
+                    label=state.label,
+                    score=det.confidence,
+                )
+            )
+
+        stale = [
+            tid
+            for tid, st in self._states.items()
+            if (self._frame_idx - st.last_seen_frame) > self.max_missed
+        ]
+        for track_id in stale:
+            del self._states[track_id]
+        return tracks

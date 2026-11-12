@@ -2,7 +2,7 @@
 type: backend-status
 owner: codex
 status: active
-updated: 2026-08-17
+updated: 2026-11-12
 ---
 
 # Milestone Recording Ingest
@@ -44,8 +44,22 @@ result through stable existing pipeline entry points.
 The public UI-facing surface is not defined yet. Once stable, Codex updates
 [[fe-be-contract]] and posts a notice in [[backend-to-frontend]].
 
+## Status (2026-11-12)
+
+- Contract, loader and validation implemented in `animaluniversity/ingest/`,
+  with tests in `tests/test_milestone_ingest.py`.
+- Validation fixes: mixed naive/aware times, unknown IANA timezones and
+  malformed JSON now give clear errors that name the field; `strict` and
+  `duration_tolerance_s` are caller-controlled.
+- Exports can be analysed directly, without extracting frames, through
+  `animaluniversity.pipeline.milestone_export_source`
+  (see [[adr-003-unified-pipeline-and-open-vocab-bootstrap]]).
+
 ## Open questions
 
 - Should the first UI select a fixed drop folder, a directory, or two files?
-- Should frame timestamps expose only timezone-aware ISO 8601 values, or also UTC
-  plus the original IANA timezone?
+- What do real XProtect exports from this site look like (container, codec,
+  whether one export spans several files)? The contract assumes one MP4.
+
+Resolved: frame timestamps expose the offset-aware ISO 8601 value, a UTC value
+(`frame_time_utc`) and the original IANA timezone.

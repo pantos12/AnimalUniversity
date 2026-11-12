@@ -56,3 +56,17 @@ Use `animaluniversity.ingest.milestone.ingest_milestone_recording` to:
 2. Extract frames into `<output_dir>/<video_stem>/frame_*.jpg`.
 3. Write a `milestone_manifest.jsonl` enriched with camera, enclosure, and
    timestamp metadata.
+
+Real exports rarely match the requested time range to the second. Pass
+`strict=False` (log mismatches instead of failing) or a larger
+`duration_tolerance_s` when ingesting real footage.
+
+## Analyse an export without extracting frames
+
+```bash
+python scripts/au_run.py --milestone-manifest data/milestone_drop/mock_recording.json \
+  --classes "lion" --db data/au.db
+```
+
+Tracks and behavior events are stored with the camera, enclosure and real-world
+time taken from the manifest.
