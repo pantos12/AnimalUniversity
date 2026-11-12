@@ -54,6 +54,14 @@ Before finishing backend work:
 - Follow vault ownership rules. Never commit secrets, credentials, production
   camera URLs, sensitive media, absolute private vault paths, or scratch notes.
 
+## Work routine (required)
+- Take tasks only from `docs/vault/backend/work-queue.md`; claim before starting.
+- Follow `docs/vault/conventions/codex-operating-guide.md` for every session:
+  one task per branch, tests that need no GPU or footage, a session log under
+  `docs/vault/log/`, and separate "Verified" / "Not verified" lists in the PR.
+- Record anything run on real hardware in
+  `docs/vault/knowledge/verification-record.md`.
+
 ## Git workflow
 - Branch from `main` as `feat/backend-<slug>` (or `fix/backend-<slug>`).
 - Never commit directly to `main`.
