@@ -54,6 +54,8 @@ Each agent writes one inbox and reads the other:
 
 Newest first. Every working session adds one under `docs/vault/log/`.
 
+- [[2026-11-12-codex-efficiency-review]]
+
 - [[2026-11-12-claude-review-and-unified-pipeline]]
 
 ## Existing design notes

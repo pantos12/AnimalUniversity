@@ -22,7 +22,7 @@ Tasks marked **needs Djuro** cannot be finished by an agent alone.
 ## Review requested by Djuro
 
 ### T10. Review unified pipeline reliability, efficiency and model choices
-- **Status:** CLAIMED Codex feat/backend-t10-pipeline-efficiency 2026-11-12
+- **Status:** IN REVIEW https://github.com/pantos12/AnimalUniversity/pull/4
 - **Do:** Review PR #3, reproduce correctness/resource issues, improve offline
   model preparation and archived inference efficiency, and document model
   candidates using official sources and measured results where available.

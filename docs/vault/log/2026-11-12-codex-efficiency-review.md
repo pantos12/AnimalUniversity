@@ -7,6 +7,7 @@ updated: 2026-11-12
 # T10: Pipeline efficiency and model review
 
 Djuro requested a review of the unified pipeline and improvements where justified.
+[Review PR #4](https://github.com/pantos12/AnimalUniversity/pull/4).
 Worked in an isolated worktree based on PR #3 (`45fef2d`); claimed T10 in its own
 published commit before editing. The review branch is stacked on PR #3 because
 the reviewed implementation is not on main yet. No frontend implementation edits.
@@ -23,7 +24,8 @@ to describe the new setup and changed dataset behavior; added a frontend handoff
 - 87 CPU-side tests pass with both pytest entry points, including the 39 original
   tests. Bug regressions were reproduced before implementing their fixes.
 - Actual Ultralytics 8.4.211 / torch 2.15.0 model preparation and CPU inference.
-  Network-denied inference completed with zero attempted connections.
+  Python socket connections were denied during inference, with zero attempted
+  calls to socket.connect.
 - Small boxes-only/batch 4: 34.046 median FPS vs original small segmentation/
   batch 1: 22.921 FPS on short synthetic clips; nano boxes-only/batch 4: 66.866 FPS.
   Detailed methodology and limitations: [[pipeline-review-2026-11-12]].

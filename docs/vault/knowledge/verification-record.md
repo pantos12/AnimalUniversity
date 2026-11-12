@@ -27,8 +27,8 @@ rewrite history. Format per entry: date, who, environment, command, result.
   OpenCV 5.0.0.93, pydantic 2.14.3, CLIP 1.0 from its official repository.
   This is not a complete `requirements.txt` compatibility check.
 - Prepared small/nano YOLOE-26 boxes-only checkpoints with cached lion prompts;
-  actual model loading and CPU prediction executed. A network-denied process
-  completed six warmed configurations with zero attempted connections. Detailed
+  actual model loading and CPU prediction executed. A process with Python socket.connect denied
+  completed six warmed configurations with zero attempted calls. Detailed
   timings and synthetic-only limits: [[pipeline-review-2026-11-12]].
 - Full CLI smoke: `au_run.py` with a prepared small checkpoint, CPU, batch 4,
   profile, SQLite and JSON output completed on 32 synthetic frames, zero animals.

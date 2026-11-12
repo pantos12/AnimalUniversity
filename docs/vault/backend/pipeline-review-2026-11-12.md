@@ -40,7 +40,7 @@ CPU on the M5/macOS 27.0.1 environment, Python 3.12.14, torch 2.15.0,
 Ultralytics 8.4.211, NumPy 2.5.4, OpenCV 5.0.0.93; 2 torch threads, image size
 640, one prompted class. Median of three warmed runs of 32 synthetic 640x360
 frames, sampled at 5 FPS. Includes source, analytics and inference; excludes
-model loading and prompt preparation. Network connection attempts were blocked
+model loading and prompt preparation. Python socket.connect calls were denied
 and counted: **zero attempts**. MPS is unavailable to this process.
 
 | Model configuration | Batch | Median FPS |

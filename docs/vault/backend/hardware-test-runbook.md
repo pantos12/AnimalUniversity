@@ -14,7 +14,8 @@ RTX 3080. Its OS, driver and GPU memory have not been inspected.
 
 Use a native arm64 Python 3.12 environment on the Mac. Apple's setup guidance
 also lists Xcode command-line tools; install them from a normal Terminal if
-needed. On the NVIDIA machine, install a CUDA-enabled PyTorch build using the
+needed. After creating and activating the environment on the NVIDIA machine, install a
+CUDA-enabled PyTorch build using the
 [official selector](https://pytorch.org/get-started/locally/); a CPU-only build
 will not use the RTX GPU. Then install the repository dependencies.
 
